@@ -1,0 +1,29 @@
+{
+  "name": "ecommerce-visual-self-service-v2",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "verify:quality-reviews": "node scripts/verify_quality_reviews.cjs",
+    "verify:quality-sidecar": "node scripts/verify_quality_reviews.cjs --run-sidecar-sample",
+    "migrate:quality-reviews": "node scripts/migrate_quality_reviews.cjs"
+  },
+  "dependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "ali-oss": "^6.23.0",
+    "clsx": "latest",
+    "lucide-react": "latest",
+    "mysql2": "latest",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "latest"
+  }
+}

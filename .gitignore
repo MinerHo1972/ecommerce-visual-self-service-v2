@@ -1,0 +1,23 @@
+node_modules/
+.next/
+out/
+dist/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+*.pid
+*.tsbuildinfo
+.DS_Store
+
+# Local task artifacts and protected backups
+.tmp_*.json
+.tmp_*.json.body
+backups/
+
+# Runtime overrides (not persisted across restarts)
+.runtime-settings.json
