@@ -1,0 +1,296 @@
+// EVSS V2 — Prisma Schema (D3 数据模型与迁移草案)
+// ORM: Prisma + PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==================== 枚举 ====================
+
+enum Role {
+  operator
+  designer
+  admin
+}
+
+enum UserStatus {
+  active
+  suspended
+}
+
+enum AssetType {
+  product_image
+  reference_image
+  template_material
+  generated_image
+}
+
+enum AssetVisibility {
+  private
+  public
+}
+
+enum TemplateStatus {
+  draft
+  published
+  archived
+}
+
+enum TemplateType {
+  prompt
+  layer
+}
+
+enum TaskType {
+  generate
+  edit
+}
+
+enum TaskStatus {
+  pending
+  running
+  succeeded
+  failed
+  canceled
+}
+
+enum AnnotationKind {
+  text
+  box
+  arrow
+  draw
+  circle
+}
+
+// ==================== 模型 ====================
+
+model User {
+  id            String     @id @default(cuid())
+  name          String
+  email         String     @unique
+  password_hash String
+  role          Role       @default(operator)
+  status        UserStatus @default(active)
+  // 飞书 OAuth 绑定字段（账密登录用户可为空）
+  feishu_open_id  String?   @unique
+  feishu_union_id String?
+  avatar_url      String?
+  created_at    DateTime   @default(now())
+  updated_at    DateTime   @updatedAt
+
+  assets            Asset[]
+  prompt_templates  PromptTemplate[]
+  layer_templates   LayerTemplate[]
+  template_versions TemplateVersion[]
+  generation_tasks  GenerationTask[]
+  annotations       Annotation[]
+  audit_logs        AuditLog[]
+
+  @@map("users")
+}
+
+model Asset {
+  id             String          @id @default(cuid())
+  type           AssetType
+  filename       String
+  mime_type      String
+  size_bytes     BigInt
+  width          Int?
+  height         Int?
+  checksum       String
+  visibility     AssetVisibility @default(private)
+  tos_bucket     String
+  tos_key        String
+  owner_id       String
+  metadata_json  Json            @default("{}")
+  deleted_at     DateTime?
+  deleted_by     String?
+  created_at     DateTime        @default(now())
+  updated_at     DateTime        @updatedAt
+
+  owner             User              @relation(fields: [owner_id], references: [id])
+  generated_images  GeneratedImage[]
+
+  @@index([owner_id])
+  @@index([type, deleted_at])
+  @@index([tos_bucket, tos_key])
+  @@index([deleted_at])
+  @@map("assets")
+}
+
+model PromptTemplate {
+  id                        String          @id @default(cuid())
+  name                      String
+  scene                     String
+  platform                  String
+  prompt_text               String
+  variable_definitions_json Json            @default("[]")
+  tags                      String[]
+  status                    TemplateStatus  @default(draft)
+  current_version           Int             @default(0)
+  created_by                String
+  created_at                DateTime        @default(now())
+  updated_at                DateTime        @updatedAt
+
+  created_by_user   User              @relation(fields: [created_by], references: [id])
+  template_versions TemplateVersion[]
+  generation_tasks  GenerationTask[]
+
+  @@index([status, scene, platform])
+  @@index([created_by])
+  @@map("prompt_templates")
+}
+
+model LayerTemplate {
+  id                        String          @id @default(cuid())
+  name                      String
+  description               String?
+  scene                     String
+  platform                  String
+  width                     Int
+  height                    Int
+  config_json               Json            @default("{}")
+  variable_definitions_json Json            @default("[]")
+  tags                      String[]
+  status                    TemplateStatus  @default(draft)
+  current_version           Int             @default(0)
+  created_by                String
+  created_at                DateTime        @default(now())
+  updated_at                DateTime        @updatedAt
+
+  created_by_user   User              @relation(fields: [created_by], references: [id])
+  template_versions TemplateVersion[]
+  generation_tasks  GenerationTask[]
+
+  @@index([status, scene, platform])
+  @@index([created_by])
+  @@map("layer_templates")
+}
+
+model TemplateVersion {
+  id            String       @id @default(cuid())
+  template_type TemplateType
+  template_id   String
+  version       Int
+  snapshot_json Json
+  created_by    String
+  created_at    DateTime     @default(now())
+
+  created_by_user   User             @relation(fields: [created_by], references: [id])
+  prompt_template   PromptTemplate?  @relation(fields: [template_id], references: [id], map: "tv_prompt_fk")
+  layer_template    LayerTemplate?   @relation(fields: [template_id], references: [id], map: "tv_layer_fk")
+
+  @@unique([template_type, template_id, version])
+  @@index([template_type, template_id])
+  @@map("template_versions")
+}
+
+model GenerationTask {
+  id                         String     @id @default(cuid())
+  task_no                    String     @unique
+  task_type                  TaskType
+  status                     TaskStatus @default(pending)
+  user_id                    String
+  source_generated_image_id  String?
+  prompt_template_id         String?
+  layer_template_id          String?
+  input_assets_json          Json       @default("{}")
+  variables_json             Json       @default("{}")
+  params_json                Json       @default("{}")
+  input_snapshot_json        Json       @default("{}")
+  edit_instruction_text      String?
+  edit_instruction_json      Json?
+  locked_at                  DateTime?
+  locked_by                  String?
+  attempt_count              Int        @default(0)
+  max_attempts               Int        @default(3)
+  provider                   String?
+  provider_task_id           String?
+  error_code                 String?
+  error_message_safe         String?
+  created_at                 DateTime   @default(now())
+  started_at                 DateTime?
+  finished_at                DateTime?
+
+  user             User             @relation(fields: [user_id], references: [id])
+  prompt_template  PromptTemplate?  @relation(fields: [prompt_template_id], references: [id])
+  layer_template   LayerTemplate?   @relation(fields: [layer_template_id], references: [id])
+  generated_images GeneratedImage[]
+
+  @@index([status, created_at])
+  @@index([user_id])
+  @@index([task_type, status])
+  @@index([provider_task_id])
+  @@map("generation_tasks")
+}
+
+model GeneratedImage {
+  id                        String    @id @default(cuid())
+  task_id                   String
+  asset_id                  String
+  root_generated_image_id   String?
+  parent_generated_image_id String?
+  version_no                Int       @default(1)
+  variant_index             Int       @default(1)
+  is_selected               Boolean   @default(false)
+  edit_instruction_json     Json?
+  quality_check_json        Json?
+  generation_params_json    Json?
+  deleted_at                DateTime?
+  created_at                DateTime  @default(now())
+
+  task          GenerationTask  @relation(fields: [task_id], references: [id])
+  asset         Asset           @relation(fields: [asset_id], references: [id])
+  root          GeneratedImage? @relation("GeneratedImageRoot", fields: [root_generated_image_id], references: [id])
+  root_children GeneratedImage[] @relation("GeneratedImageRoot")
+  parent        GeneratedImage? @relation("GeneratedImageParent", fields: [parent_generated_image_id], references: [id])
+  parent_children GeneratedImage[] @relation("GeneratedImageParent")
+  annotations   Annotation[]
+
+  @@index([task_id])
+  @@index([root_generated_image_id])
+  @@index([parent_generated_image_id])
+  @@index([asset_id])
+  @@index([deleted_at])
+  @@map("generated_images")
+}
+
+model Annotation {
+  id                 String         @id @default(cuid())
+  generated_image_id String
+  kind               AnnotationKind
+  region_text        String?
+  geometry_json      Json?
+  text               String?
+  created_by         String
+  created_at         DateTime       @default(now())
+
+  generated_image GeneratedImage @relation(fields: [generated_image_id], references: [id])
+  created_by_user User           @relation(fields: [created_by], references: [id])
+
+  @@index([generated_image_id])
+  @@map("annotations")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actor_user_id String
+  action        String
+  target_type   String
+  target_id     String?
+  detail_json   Json     @default("{}")
+  ip            String?
+  user_agent    String?
+  created_at    DateTime @default(now())
+
+  actor_user User @relation(fields: [actor_user_id], references: [id])
+
+  @@index([actor_user_id])
+  @@index([action, created_at])
+  @@index([target_type, target_id])
+  @@map("audit_logs")
+}
