@@ -75,6 +75,8 @@ const HANDLE_SIZE = 10
  * - hover 时右上角显示 × 删除按钮，右下角显示拖拽手柄支持调整大小
  * - 支持拖动已有框（在框内按下并拖动）
  */
+const ZOOM_OPTIONS = [1, 1.5, 2, 3, 4] as const
+
 export function MultiRegionPicker({
   imageUrl,
   canvasSize,
@@ -88,8 +90,37 @@ export function MultiRegionPicker({
 }: MultiRegionPickerProps) {
   const [drag, setDrag] = React.useState<DragMode>(null)
   const [hoverId, setHoverId] = React.useState<string | null>(null)
+  const [zoom, setZoom] = React.useState<number>(1)
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
+  const scrollerRef = React.useRef<HTMLDivElement | null>(null)
+  // 切换缩放后让已选第一个区域滚到视野中央
+  const centerOnRegions = React.useCallback(() => {
+    const el = scrollerRef.current
+    if (!el || value.length === 0) return
+    // 找到所有框的包围盒中心
+    let minX = 1, minY = 1, maxX = 0, maxY = 0
+    value.forEach(r => {
+      minX = Math.min(minX, r.rect.x)
+      minY = Math.min(minY, r.rect.y)
+      maxX = Math.max(maxX, r.rect.x + r.rect.width)
+      maxY = Math.max(maxY, r.rect.y + r.rect.height)
+    })
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    // 等下一帧 layout 更新后再滚
+    requestAnimationFrame(() => {
+      const contentW = el.scrollWidth
+      const contentH = el.scrollHeight
+      el.scrollLeft = cx * contentW - el.clientWidth / 2
+      el.scrollTop = cy * contentH - el.clientHeight / 2
+    })
+  }, [value])
+
+  React.useEffect(() => {
+    centerOnRegions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom])
 
   const getPt = React.useCallback((e: { clientX: number; clientY: number }): Pt => {
     const el = containerRef.current
@@ -212,24 +243,82 @@ export function MultiRegionPicker({
 
   return (
     <div className={`multi-region-picker ${className}`.trim()}>
+      {/* 缩放工具栏 */}
+      {!readonly && (
+        <div
+          className="region-zoombar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            marginBottom: 8,
+            fontSize: 12,
+            color: "var(--muted)",
+            flexWrap: "wrap",
+          }}
+        >
+          <span>缩放：</span>
+          {ZOOM_OPTIONS.map((z) => {
+            const active = Math.abs(zoom - z) < 0.01
+            return (
+              <button
+                type="button"
+                key={z}
+                onClick={() => setZoom(z)}
+                className={active ? "evss-btn primary" : "evss-btn ghost"}
+                style={{ minHeight: 26, padding: "2px 10px", fontSize: 12 }}
+                title={`${z}× 显示`}
+              >
+                {z}×
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            className="evss-btn ghost"
+            style={{ minHeight: 26, padding: "2px 10px", fontSize: 12 }}
+            onClick={() => setZoom(1)}
+            title="适应画布宽度"
+          >
+            适应
+          </button>
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>
+            {zoom > 1 ? "滚动画面查看 / 精细框选" : ""}
+          </span>
+        </div>
+      )}
+      {/* 滚动容器：放大后内部元素溢出，靠滚动来查看 */}
       <div
-        ref={containerRef}
-        className="region-picker"
+        ref={scrollerRef}
+        className="region-scroller"
         style={{
-          aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,
-          position: "relative",
-          userSelect: "none",
-          cursor: readonly ? "default" : "crosshair",
+          overflow: zoom > 1 ? "auto" : "hidden",
+          maxHeight: zoom > 1 ? "72vh" : "none",
+          border: zoom > 1 ? "1px solid var(--border)" : "none",
+          borderRadius: 6,
+          background: "#f8fafc",
         }}
-        onMouseDown={handleCanvasMouseDown}
-        title={readonly ? "" : "按住鼠标拖选矩形区域；拖框移动/右下角调整大小"}
       >
-        <img
-          src={imageUrl}
-          alt="待框选"
-          style={{ width: "100%", display: "block", pointerEvents: "none" }}
-          draggable={false}
-        />
+        <div
+          ref={containerRef}
+          className="region-picker"
+          style={{
+            aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,
+            position: "relative",
+            userSelect: "none",
+            cursor: readonly ? "default" : "crosshair",
+            width: zoom > 1 ? `${zoom * 100}%` : "100%",
+            transformOrigin: "top left",
+          }}
+          onMouseDown={handleCanvasMouseDown}
+          title={readonly ? "" : "按住鼠标拖选矩形区域；拖框移动/角点调整大小"}
+        >
+          <img
+            src={imageUrl}
+            alt="待框选"
+            style={{ width: "100%", display: "block", pointerEvents: "none" }}
+            draggable={false}
+          />
         {value.map((r) => {
           const style = toPercentStyle(r.rect)
           const isAccent = (r.index % 2) === 0
@@ -353,7 +442,8 @@ export function MultiRegionPicker({
             }}
           />
         )}
-      </div>
+        </div>{/* /.region-picker (containerRef) */}
+      </div>{/* /.region-scroller (scrollerRef) */}
       <div
         className="region-readout"
         style={{
