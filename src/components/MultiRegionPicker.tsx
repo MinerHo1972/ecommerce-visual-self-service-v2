@@ -94,6 +94,31 @@ export function MultiRegionPicker({
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
   const scrollerRef = React.useRef<HTMLDivElement | null>(null)
+  const sizerRef = React.useRef<HTMLDivElement | null>(null)
+  const [baseW, setBaseW] = React.useState<number>(0)
+
+  // 测量 scroller 未缩放时的可视宽度，作为 baseW；用 ResizeObserver 持续跟踪
+  React.useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const update = () => {
+      // zoom=1 时测量；zoom>1 时也读 clientWidth（即外层给的宽度）
+      setBaseW(el.clientWidth)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // sizer 实际物理像素宽高：baseW * zoom × baseW/ratio * zoom
+  const sizerStyle: React.CSSProperties = React.useMemo(() => {
+    if (!baseW) return { width: "100%", position: "relative" as const }
+    const ratio = canvasSize.w / canvasSize.h
+    const w = Math.round(baseW * zoom)
+    const h = Math.round(w / ratio)
+    return { width: w, height: h, position: "relative" as const }
+  }, [baseW, zoom, canvasSize.w, canvasSize.h])
   // 切换缩放后让已选第一个区域滚到视野中央
   const centerOnRegions = React.useCallback(() => {
     const el = scrollerRef.current
@@ -297,8 +322,13 @@ export function MultiRegionPicker({
           border: zoom > 1 ? "1px solid var(--border)" : "none",
           borderRadius: 6,
           background: "#f8fafc",
+          position: "relative",
         }}
       >
+        <div
+          ref={sizerRef}
+          style={sizerStyle}
+        >
         <div
           ref={containerRef}
           className="region-picker"
@@ -307,8 +337,14 @@ export function MultiRegionPicker({
             position: "relative",
             userSelect: "none",
             cursor: readonly ? "default" : "crosshair",
-            width: zoom > 1 ? `${zoom * 100}%` : "100%",
-            transformOrigin: "top left",
+            width: "100%",
+            height: "100%",
+            maxWidth: "none",
+            marginTop: 0,
+            background: "#0f172a",
+            border: "1px solid var(--border)",
+            borderRadius: zoom > 1 ? 0 : 16,
+            overflow: "hidden",
           }}
           onMouseDown={handleCanvasMouseDown}
           title={readonly ? "" : "按住鼠标拖选矩形区域；拖框移动/角点调整大小"}
@@ -316,7 +352,7 @@ export function MultiRegionPicker({
           <img
             src={imageUrl}
             alt="待框选"
-            style={{ width: "100%", display: "block", pointerEvents: "none" }}
+            style={{ width: "100%", height: "100%", display: "block", pointerEvents: "none", objectFit: "cover" }}
             draggable={false}
           />
         {value.map((r) => {
