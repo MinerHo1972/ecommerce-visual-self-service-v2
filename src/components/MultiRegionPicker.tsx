@@ -479,6 +479,7 @@ export function MultiRegionPicker({
           />
         )}
         </div>{/* /.region-picker (containerRef) */}
+        </div>{/* /.sizer (sizerRef) */}
       </div>{/* /.region-scroller (scrollerRef) */}
       <div
         className="region-readout"
