@@ -178,6 +178,11 @@ export default function OperatorPage() {
           </button>
         </nav>
         <div className="evss-sidebar-footer">
+          {role === "admin" && (
+            <a href="/admin" className="evss-nav-item evss-nav-admin" style={{ textDecoration: "none", color: "inherit", justifyContent: "flex-start" }}>
+              <span className="nav-icon">⚙️</span><span>管理后台</span>
+            </a>
+          )}
           <button className="evss-logout" onClick={handleLogout}>退出登录</button>
         </div>
       </aside>

@@ -2,27 +2,29 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import UsersPage from './users/page'
 
 interface UserInfo {
   id: string
   name: string
   email: string
   role: string
+  avatar_url?: string | null
 }
+
+type Nav = 'users' | 'system' | 'stats'
 
 export default function AdminPage() {
   const router = useRouter()
   const [user, setUser] = useState<UserInfo | null>(null)
+  const [nav, setNav] = useState<Nav>('users')
 
   useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
-        if (data.data?.user) {
-          setUser(data.data.user)
-        } else {
-          router.push('/login')
-        }
+        if (data.data?.user) setUser(data.data.user)
+        else router.push('/login')
       })
   }, [router])
 
@@ -31,32 +33,40 @@ export default function AdminPage() {
     router.push('/login')
   }
 
-  if (!user) {
-    return <div className="min-h-screen flex items-center justify-center">加载中...</div>
-  }
+  if (!user) return <div style={{ padding: '20px', maxWidth: 1280, margin: '0 auto' }}><div className="evss-card" style={{ padding: 32, color: '#94a3b8', textAlign: 'center' }}>加载中…</div></div>
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold">电商生图工作台 <span className="muted font-normal">— 管理员</span></h1>
-            <span className="eyebrow">V2 · P0 精装版</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm muted">欢迎，{user.name}（管理员）</span>
-            <button onClick={handleLogout} className="button">退出登录</button>
+    <div style={{ padding: '20px', maxWidth: 1280, margin: '0 auto' }}>
+      <div className="evss-admin-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="evss-logo-badge" style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)' }}>V2</div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#0f172a' }}>电商生图工作台</h2>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>管理控制台 · admin</div>
           </div>
         </div>
-      </header>
-      <main className="page">
-        <div className="panel">
-          <div className="panel-head"><h2 className="panel-title">管理工作台</h2></div>
-          <div className="p-6 muted">
-            <p>管理工作台首页（S3 占位）。后续将接入用户管理、系统配置、用量统计等功能。</p>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <a href="/operator" className="evss-link">← 返回工作台</a>
+          {user.avatar_url && <img src={user.avatar_url} style={{ width: 32, height: 32, borderRadius: '50%' }} alt="" />}
+          <span style={{ fontSize: 13, color: '#475569' }}>{user.name}</span>
+          <button className="evss-btn evss-btn-sm" onClick={handleLogout}>退出</button>
         </div>
-      </main>
+      </div>
+
+      <div className="evss-admin-layout">
+        <aside className="evss-admin-side">
+          <div className="evss-side-title">系统管理</div>
+          <button className={`evss-side-item ${nav === 'users' ? 'active' : ''}`} onClick={() => setNav('users')}>👥 用户管理</button>
+          <button className={`evss-side-item ${nav === 'system' ? 'active' : ''}`} disabled onClick={() => setNav('system')}>⚙️ 系统配置</button>
+          <button className={`evss-side-item ${nav === 'stats' ? 'active' : ''}`} disabled onClick={() => setNav('stats')}>📊 用量统计</button>
+          <div className="evss-side-hint">配置/统计模块后续开放</div>
+        </aside>
+        <main className="evss-admin-main">
+          {nav === 'users' && <UsersPage />}
+          {nav === 'system' && <div className="evss-card" style={{ padding: 32, color: '#94a3b8' }}>系统配置（建设中）</div>}
+          {nav === 'stats' && <div className="evss-card" style={{ padding: 32, color: '#94a3b8' }}>用量统计（建设中）</div>}
+        </main>
+      </div>
     </div>
   )
 }
