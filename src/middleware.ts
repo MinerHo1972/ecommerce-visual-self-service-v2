@@ -7,6 +7,7 @@ const PUBLIC_ROUTES = ['/login', '/api/health']
 // Route prefix -> roles allowed to access
 // admin 可以访问全部业务页面；operator/designer 只能访问自己的页面
 const ROLE_ROUTES: Record<string, string[]> = {
+  '/assets': ['operator', 'designer', 'admin'],
   '/operator': ['operator', 'admin'],
   '/designer': ['designer', 'admin'],
   '/admin': ['admin'],

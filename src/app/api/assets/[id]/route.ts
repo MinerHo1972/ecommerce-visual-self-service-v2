@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/api-auth'
-import { AssetVisibility } from '@prisma/client'
+import { canReadAsset, canWriteAsset } from '@/lib/assets/access'
+import { resolveAssetDisplayName, validateAssetDisplayName } from '@/lib/assets/display-name'
+import { AssetVisibility, Prisma } from '@prisma/client'
 
 export async function GET(
   req: NextRequest,
@@ -25,8 +27,7 @@ export async function GET(
       )
     }
 
-    // Owner / admin / public 可见
-    if (asset.owner_id !== auth.userId && auth.role !== 'admin' && asset.visibility !== 'public') {
+    if (!canReadAsset(auth, asset)) {
       return NextResponse.json(
         { error: { code: 'FORBIDDEN', message: '无权访问' } },
         { status: 403 }
@@ -38,6 +39,7 @@ export async function GET(
         id: asset.id,
         type: asset.type,
         filename: asset.filename,
+        display_name: resolveAssetDisplayName(asset.display_name, asset.filename),
         mime_type: asset.mime_type,
         size_bytes: Number(asset.size_bytes),
         width: asset.width,
@@ -60,63 +62,6 @@ export async function GET(
   }
 }
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const auth = await requireAuth(req)
-    if (auth instanceof NextResponse) return auth
-
-    const { id } = await params
-
-    const asset = await prisma.asset.findUnique({ where: { id } })
-
-    if (!asset || asset.deleted_at) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '资产不存在' } },
-        { status: 404 }
-      )
-    }
-
-    // 仅 owner / admin 可删
-    if (asset.owner_id !== auth.userId && auth.role !== 'admin') {
-      return NextResponse.json(
-        { error: { code: 'FORBIDDEN', message: '无权删除' } },
-        { status: 403 }
-      )
-    }
-
-    await prisma.asset.update({
-      where: { id },
-      data: {
-        deleted_at: new Date(),
-        deleted_by: auth.userId,
-      },
-    })
-
-    await prisma.auditLog.create({
-      data: {
-        actor_user_id: auth.userId,
-        action: 'asset_deleted',
-        target_type: 'asset',
-        target_id: id,
-        detail_json: { filename: asset.filename, tos_key: asset.tos_key },
-        ip: req.headers.get('x-forwarded-for') || null,
-        user_agent: req.headers.get('user-agent') || null,
-      },
-    }).catch(() => {})
-
-    return NextResponse.json({ data: null, message: '已删除' })
-  } catch (err) {
-    console.error('[asset delete] error:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' } },
-      { status: 500 }
-    )
-  }
-}
-
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -126,14 +71,50 @@ export async function PATCH(
     if (auth instanceof NextResponse) return auth
 
     const { id } = await params
-    const body = await req.json().catch(() => ({}))
-    const { visibility } = body as { visibility?: AssetVisibility }
-
-    if (!visibility || !['public', 'private'].includes(visibility)) {
+    const body = await req.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json(
-        { error: { code: 'INVALID_INPUT', message: 'visibility 必须是 public 或 private' } },
+        { error: { code: 'INVALID_INPUT', message: '请求体必须是对象' } },
         { status: 400 }
       )
+    }
+    const input = body as Record<string, unknown>
+    const supportedFields = ['visibility', 'display_name']
+    const unknownFields = Object.keys(input).filter((key) => !supportedFields.includes(key))
+    if (unknownFields.length > 0) {
+      return NextResponse.json(
+        { error: { code: 'INVALID_INPUT', message: `不支持字段：${unknownFields.join(', ')}` } },
+        { status: 400 }
+      )
+    }
+    if (!Object.prototype.hasOwnProperty.call(input, 'visibility') && !Object.prototype.hasOwnProperty.call(input, 'display_name')) {
+      return NextResponse.json(
+        { error: { code: 'INVALID_INPUT', message: '至少提供 visibility 或 display_name' } },
+        { status: 400 }
+      )
+    }
+
+    let visibility: AssetVisibility | undefined
+    if (Object.prototype.hasOwnProperty.call(input, 'visibility')) {
+      if (typeof input.visibility !== 'string' || !['public', 'private'].includes(input.visibility)) {
+        return NextResponse.json(
+          { error: { code: 'INVALID_INPUT', message: 'visibility 必须是 public 或 private' } },
+          { status: 400 }
+        )
+      }
+      visibility = input.visibility as AssetVisibility
+    }
+
+    let displayName: string | undefined
+    if (Object.prototype.hasOwnProperty.call(input, 'display_name')) {
+      const validation = validateAssetDisplayName(input.display_name)
+      if (!validation.ok) {
+        return NextResponse.json(
+          { error: { code: 'INVALID_INPUT', message: validation.message } },
+          { status: 400 }
+        )
+      }
+      displayName = validation.value
     }
 
     const asset = await prisma.asset.findUnique({ where: { id } })
@@ -143,7 +124,7 @@ export async function PATCH(
         { status: 404 }
       )
     }
-    if (asset.owner_id !== auth.userId && auth.role !== 'admin') {
+    if (!canWriteAsset(auth, asset)) {
       return NextResponse.json(
         { error: { code: 'FORBIDDEN', message: '无权修改此资产' } },
         { status: 403 }
@@ -152,21 +133,43 @@ export async function PATCH(
 
     const updated = await prisma.asset.update({
       where: { id },
-      data: { visibility },
-      select: { id: true, visibility: true },
+      data: {
+        ...(visibility !== undefined ? { visibility } : {}),
+        ...(displayName !== undefined ? { display_name: displayName } : {}),
+      },
+      select: { id: true, visibility: true, filename: true, display_name: true },
     })
 
-    await prisma.auditLog.create({
-      data: {
+    const auditEntries: Prisma.AuditLogCreateManyInput[] = []
+    if (visibility !== undefined && visibility !== asset.visibility) {
+      auditEntries.push({
         actor_user_id: auth.userId,
         action: 'asset_visibility_changed',
         target_type: 'asset',
         target_id: id,
         detail_json: { from: asset.visibility, to: visibility },
-      },
-    }).catch(() => {})
+      })
+    }
+    const oldDisplayName = resolveAssetDisplayName(asset.display_name, asset.filename)
+    if (displayName !== undefined && displayName !== oldDisplayName) {
+      auditEntries.push({
+        actor_user_id: auth.userId,
+        action: 'asset_display_name_changed',
+        target_type: 'asset',
+        target_id: id,
+        detail_json: { from: oldDisplayName, to: displayName, filename: asset.filename },
+      })
+    }
+    if (auditEntries.length > 0) {
+      await prisma.auditLog.createMany({ data: auditEntries }).catch(() => {})
+    }
 
-    return NextResponse.json({ data: updated })
+    return NextResponse.json({
+      data: {
+        ...updated,
+        display_name: resolveAssetDisplayName(updated.display_name, updated.filename),
+      },
+    })
   } catch (err) {
     console.error('[asset patch] error:', err)
     return NextResponse.json(

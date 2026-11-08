@@ -23,10 +23,12 @@ interface AssetOption {
 interface RegionInstructionListProps {
   regions: RegionInstruction[]
   onChange: (regions: RegionInstruction[]) => void
-  /** 可选资产列表（用于选择参考图） */
+  /** 可选资产列表（用于选择参考图）；不提供时仅以「已选」形式展示 */
   assets?: AssetOption[]
   /** 可选：从资产拿预览 URL */
   getAssetPreviewUrl?: (assetId: string) => string | undefined
+  /** 可选：触发打开图库参考图选择器（父组件弹 GalleryPickModal） */
+  onPickReference?: (regionId: string) => void
   /** 折叠状态 */
   collapsible?: boolean
 }
@@ -40,9 +42,9 @@ const OP_TAGS: Array<{ value: string; label: string }> = [
   { value: "other", label: "其他" },
 ]
 
-export function RegionInstructionList({ regions, onChange, assets, getAssetPreviewUrl, collapsible }: RegionInstructionListProps) {
+export function RegionInstructionList({ regions, onChange, assets, getAssetPreviewUrl, onPickReference, collapsible }: RegionInstructionListProps) {
   const [collapsedIds, setCollapsedIds] = React.useState<Set<string>>(new Set())
-  /** 当前展开「参考图选择器」的区域 id，null 表示全部关闭 */
+  /** 当前展开「参考图选择器」的区域 id，null 表示全部关闭（仅在内联 picker 模式下使用） */
   const [pickerOpenFor, setPickerOpenFor] = React.useState<string | null>(null)
 
   const update = React.useCallback(
@@ -119,26 +121,30 @@ export function RegionInstructionList({ regions, onChange, assets, getAssetPrevi
 
                 <div className="ri-ref-row">
                   <div className="ri-ref-label">参考图（可选）</div>
-                  {r.referenceAssetId && getAssetPreviewUrl?.(r.referenceAssetId) ? (
+                  {r.referenceAssetId ? (
                     <div className="ri-ref-selected">
-                      <img
-                        src={getAssetPreviewUrl(r.referenceAssetId)}
-                        alt="ref"
-                        className="ri-ref-thumb"
-                      />
+                      {getAssetPreviewUrl?.(r.referenceAssetId) ? (
+                        <img
+                          src={getAssetPreviewUrl(r.referenceAssetId)}
+                          alt="ref"
+                          className="ri-ref-thumb"
+                        />
+                      ) : (
+                        <div className="ri-ref-thumb ri-ref-thumb-fallback" title="参考图">🖼️</div>
+                      )}
                       <span className="ri-ref-name">
-                        {(assets || []).find(a => a.id === r.referenceAssetId)?.filename || "已选"}
+                        {(assets || []).find(a => a.id === r.referenceAssetId)?.filename || "已选参考图"}
                       </span>
-                      <button type="button" className="ri-mini-btn danger" onClick={() => update(r.id, { referenceAssetId: undefined })}>清除</button>
-                      <button type="button" className="ri-mini-btn" onClick={() => setPickerOpenFor(pickerOpen ? null : r.id)}>更换</button>
+                      <button type="button" className="ri-mini-btn danger" onClick={() => update(r.id, { referenceAssetId: undefined, referenceImageUrl: undefined })}>清除</button>
+                      <button type="button" className="ri-mini-btn" onClick={() => onPickReference ? onPickReference(r.id) : setPickerOpenFor(pickerOpen ? null : r.id)}>更换</button>
                     </div>
                   ) : (
-                    <button type="button" className="ri-mini-btn primary" onClick={() => setPickerOpenFor(pickerOpen ? null : r.id)}>
+                    <button type="button" className="ri-mini-btn primary" onClick={() => onPickReference ? onPickReference(r.id) : setPickerOpenFor(pickerOpen ? null : r.id)}>
                       + 选择参考图
                     </button>
                   )}
 
-                  {pickerOpen && (
+                  {pickerOpen && !onPickReference && (
                     <div className="ri-picker">
                       <div className="ri-picker-head">
                         <span>从图库选择参考图</span>
