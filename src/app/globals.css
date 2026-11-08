@@ -3747,8 +3747,9 @@ html, body { background: var(--evss-bg); }
   position: relative;
   min-height: 100vh;
   min-height: 100svh;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   padding: clamp(24px, 5vw, 48px) 20px;
   color: var(--foreground);
   background:
@@ -3756,7 +3757,7 @@ html, body { background: var(--evss-bg); }
     radial-gradient(70% 60% at 86% 8%, rgba(196, 152, 110, 0.18) 0%, rgba(196, 152, 110, 0) 62%),
     radial-gradient(60% 50% at 8% 92%, rgba(160, 112, 74, 0.12) 0%, rgba(160, 112, 74, 0) 66%),
     linear-gradient(180deg, #f7eee4 0%, #f1e5d8 100%);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .login-page::before {
@@ -3776,6 +3777,7 @@ html, body { background: var(--evss-bg); }
   z-index: 1;
   width: 100%;
   max-width: 420px;
+  margin: auto;
   display: flex;
   flex-direction: column;
   align-items: center;

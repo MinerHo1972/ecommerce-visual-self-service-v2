@@ -45,7 +45,7 @@ function LoginInner() {
           <p className="login-subtitle">使用飞书账号登录</p>
 
           {error && (
-            <div className="login-error" role="alert" aria-live="polite">
+            <div className="login-error" role="alert">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 8v4" />
