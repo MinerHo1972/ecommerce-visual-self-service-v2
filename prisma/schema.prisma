@@ -97,6 +97,7 @@ model Asset {
   id             String          @id @default(cuid())
   type           AssetType
   filename       String
+  display_name   String?
   mime_type      String
   size_bytes     BigInt
   width          Int?
@@ -105,6 +106,7 @@ model Asset {
   visibility     AssetVisibility @default(private)
   tos_bucket     String
   tos_key        String
+  thumb_tos_key  String?
   owner_id       String
   metadata_json  Json            @default("{}")
   deleted_at     DateTime?

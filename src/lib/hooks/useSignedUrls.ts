@@ -8,19 +8,25 @@ import * as React from "react"
  * - urls[id] 为已获取到的 signed url
  * 简单的固定窗口并发（p-limit 语义）。
  */
-export function useSignedUrls(concurrency = 6) {
+export function useSignedUrls(concurrency = 6, variant?: "thumb") {
   const [urls, setUrls] = React.useState<Record<string, string>>({})
   const queueRef = React.useRef<string[]>([])
   const inFlightRef = React.useRef<Set<string>>(new Set())
   const doneRef = React.useRef<Set<string>>(new Set())
+  const epochRef = React.useRef(0)
+  const pumpRef = React.useRef<() => void>(() => {})
 
   const fetchOne = React.useCallback(async (id: string) => {
     if (doneRef.current.has(id) || inFlightRef.current.has(id)) return
+    const epoch = epochRef.current
     inFlightRef.current.add(id)
     try {
-      const res = await fetch(`/api/assets/${id}/signed-url`)
+      const qs = variant ? `?variant=${variant}` : ""
+      const res = await fetch(`/api/assets/${id}/signed-url${qs}`)
+      if (epoch !== epochRef.current) return
       if (!res.ok) return
       const json = await res.json()
+      if (epoch !== epochRef.current) return
       const url = json?.data?.url as string | undefined
       if (url) {
         setUrls((prev) => ({ ...prev, [id]: url }))
@@ -28,11 +34,12 @@ export function useSignedUrls(concurrency = 6) {
     } catch {
       // ignore
     } finally {
+      if (epoch !== epochRef.current) return
       inFlightRef.current.delete(id)
       doneRef.current.add(id)
-      pump()
+      pumpRef.current()
     }
-  }, [])
+  }, [variant])
 
   const pump = React.useCallback(() => {
     while (inFlightRef.current.size < concurrency && queueRef.current.length > 0) {
@@ -42,6 +49,10 @@ export function useSignedUrls(concurrency = 6) {
       void fetchOne(id)
     }
   }, [concurrency, fetchOne])
+
+  React.useEffect(() => {
+    pumpRef.current = pump
+  }, [pump])
 
   const enqueue = React.useCallback(
     (id: string) => {
@@ -66,6 +77,7 @@ export function useSignedUrls(concurrency = 6) {
   )
 
   const reset = React.useCallback(() => {
+    epochRef.current += 1
     queueRef.current = []
     inFlightRef.current.clear()
     doneRef.current.clear()

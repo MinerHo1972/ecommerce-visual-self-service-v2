@@ -15,6 +15,7 @@ interface AssetItem {
   id: string
   type: string
   filename: string
+  display_name?: string
   width: number | null
   height: number | null
   created_at: string
@@ -172,10 +173,9 @@ export default function OperatorPage() {
             onClick={() => { setActiveTab("workbench"); setAsideOpen(false) }}>
             <span className="nav-icon">🎨</span><span>工作台</span>
           </button>
-          <button className={`evss-nav-item ${activeTab === "gallery" ? "active" : ""}`}
-            onClick={() => { setActiveTab("gallery"); setAsideOpen(false) }}>
+          <a className="evss-nav-item" href="/assets" style={{ textDecoration: "none", color: "inherit" }}>
             <span className="nav-icon">🖼️</span><span>图库</span>
-          </button>
+          </a>
         </nav>
         <div className="evss-sidebar-footer">
           {role === "admin" && (
@@ -215,14 +215,7 @@ export default function OperatorPage() {
           <div className="evss-content">
             {activeTab === "workbench" ? (
               <Workbench onToast={showToast} />
-            ) : (
-              <Gallery role={role} onPickBase={(asset) => {
-                // 跨 tab 选底图：把 url 一起带过去
-                window.dispatchEvent(new CustomEvent("evss:pick-base", { detail: asset }))
-                setActiveTab("workbench")
-                showToast("已选作底图", "ok")
-              }} onToast={showToast} />
-            )}
+            ) : null}
           </div>
           <aside className={`evss-aside ${asideOpen ? "evss-aside-open" : ""}`}>
             <ResultPanel onToast={showToast} />
@@ -307,35 +300,10 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
   // regions
   const [regions, setRegions] = useState<RegionItem[]>([])
   const [instructions, setInstructions] = useState<RegionInstruction[]>([])
-  const [assets, setAssets] = useState<AssetItem[]>([])
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
-
   // params
   // Seedream 5.0 Pro 仅支持单图生成，固定为 1 张
   const nChoice: 1 = 1
   const [submitting, setSubmitting] = useState(false)
-
-  // fetch assets + previews
-  const fetchAssets = useCallback(async () => {
-    try {
-      const res = await authFetch("/api/assets?limit=100")
-      if (!res.ok) return
-      const j = await res.json()
-      setAssets(j.data?.items || [])
-    } catch {}
-  }, [])
-  useEffect(() => { fetchAssets() }, [fetchAssets])
-
-  // auto-load preview URLs（走同源代理 /api/assets/[id]/preview，避免 TOS 直连跨域/超时）
-  const loadedRef = useRef<Set<string>>(new Set())
-  useEffect(() => {
-    const missing = assets.filter(a => !previewUrls[a.id] && !loadedRef.current.has(a.id))
-    if (!missing.length) return
-    missing.forEach(a => loadedRef.current.add(a.id))
-    missing.forEach((a) => {
-      setPreviewUrls(p => p[a.id] ? p : ({ ...p, [a.id]: `/api/assets/${a.id}/preview` }))
-    })
-  }, [assets, previewUrls])
 
   // listen for cross-tab "pick base" events（detail 含 id/filename/url/width/height）
   useEffect(() => {
@@ -350,7 +318,7 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
         setBaseSize({ w: asset.width || 800, h: asset.height || 800 })
       } else {
         setBaseAssetId(asset.id); setBaseImageId("")
-        setBaseUrl(asset.url || previewUrls[asset.id] || `/api/assets/${asset.id}/preview`)
+        setBaseUrl(asset.url || `/api/assets/${asset.id}/preview`)
         setBaseFilename(asset.filename)
         setBaseSize({ w: asset.width || 800, h: asset.height || 800 })
       }
@@ -359,13 +327,22 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
     }
     window.addEventListener("evss:pick-base", handler as EventListener)
     return () => window.removeEventListener("evss:pick-base", handler as EventListener)
-  }, [previewUrls])
+  }, [])
 
   // pick base from gallery modal
   const [galleryPickOpen, setGalleryPickOpen] = useState(false)
+  // pick reference image for a specific region (region id → modal open)
+  const [refPickRegionId, setRefPickRegionId] = useState<string | null>(null)
+  const refPreviewCache = useRef<Record<string, string>>({})
+  const getRefPreviewUrl = useCallback((id: string) => {
+    if (!refPreviewCache.current[id]) {
+      refPreviewCache.current[id] = `/api/assets/${id}/preview?variant=thumb`
+    }
+    return refPreviewCache.current[id]
+  }, [])
   const pickFromGallery = (a: AssetItem) => {
     setBaseAssetId(a.id); setBaseImageId("")
-    setBaseUrl(previewUrls[a.id] || "")
+    setBaseUrl(`/api/assets/${a.id}/preview`)
     setBaseFilename(a.filename)
     setBaseSize({ w: a.width || 800, h: a.height || 800 })
     setRegions([]); setInstructions([])
@@ -383,13 +360,11 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
       const asset = j.data?.asset || j.data
       setBaseAssetId(asset.id); setBaseImageId("")
       setBaseFilename(asset.filename || file.name)
-      // 上传后用同源代理预览
+      // 上传后用同源代理预览（原图，用于编辑底图）
       setBaseUrl(`/api/assets/${asset.id}/preview`)
-      setPreviewUrls(p => ({ ...p, [asset.id]: `/api/assets/${asset.id}/preview` }))
       setBaseSize({ w: asset.width || 800, h: asset.height || 800 })
       setRegions([]); setInstructions([])
       setStore({ result: { kind: "empty" } })
-      fetchAssets()
       onToast("上传成功", "ok")
     } catch (e: any) { onToast(e.message || "上传失败", "err") }
   }
@@ -641,8 +616,8 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
             <RegionInstructionList
               regions={instructions}
               onChange={setInstructions}
-              assets={assets.map(a => ({ id: a.id, filename: a.filename, width: a.width, height: a.height }))}
-              getAssetPreviewUrl={(id) => previewUrls[id]}
+              getAssetPreviewUrl={getRefPreviewUrl}
+              onPickReference={(regionId) => setRefPickRegionId(regionId)}
             />
           )}
         </div>
@@ -665,13 +640,23 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
       {/* 图库选底图 modal */}
       {galleryPickOpen && (
         <GalleryPickModal
-          assets={assets}
-          previewUrls={previewUrls}
+          title="从图库选底图"
           onClose={() => setGalleryPickOpen(false)}
           onPick={pickFromGallery}
-          onRequestPreview={async (id) => {
-            if (previewUrls[id]) return
-            setPreviewUrls(p => ({ ...p, [id]: `/api/assets/${id}/preview` }))
+        />
+      )}
+
+      {/* 图库选参考图 modal（区域级） */}
+      {refPickRegionId && (
+        <GalleryPickModal
+          title="选择参考图"
+          onClose={() => setRefPickRegionId(null)}
+          onPick={(a) => {
+            const regionId = refPickRegionId
+            setInstructions(prev => prev.map(r => r.id === regionId
+              ? { ...r, referenceAssetId: a.id, referenceImageUrl: `/api/assets/${a.id}/preview?variant=thumb` }
+              : r))
+            setRefPickRegionId(null)
           }}
         />
       )}
@@ -679,51 +664,141 @@ function EditWorkbench({ onToast }: { onToast: (m: string, k?: "ok" | "err") => 
   )
 }
 
-// ============ Gallery Pick Modal ============
-function GalleryPickModal({ assets, previewUrls, onClose, onPick, onRequestPreview }: {
-  assets: AssetItem[]
-  previewUrls: Record<string, string>
+// ============ Gallery Pick Modal (server-side search + pagination) ============
+const GALLERY_PICK_PAGE_SIZE = 24
+const GALLERY_PICK_TYPE_LABELS: Record<string, string> = {
+  all: "全部",
+  product_image: "商品图",
+  reference_image: "参考图",
+  template_material: "模板素材",
+  generated_image: "生成图",
+}
+type PickTypeFilter = keyof typeof GALLERY_PICK_TYPE_LABELS
+
+function GalleryPickModal({ onClose, onPick, title }: {
   onClose: () => void
   onPick: (a: AssetItem) => void
-  onRequestPreview: (id: string) => void
+  title?: string
 }) {
   const [q, setQ] = useState("")
-  const filtered = assets.filter(a => !q || a.filename.toLowerCase().includes(q.toLowerCase()))
+  const [debouncedQ, setDebouncedQ] = useState("")
+  const [typeFilter, setTypeFilter] = useState<PickTypeFilter>("all")
+  const [items, setItems] = useState<AssetItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [previewMap, setPreviewMap] = useState<Record<string, string>>({})
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // debounce search
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 300)
+    return () => clearTimeout(t)
+  }, [q])
+
+  // reset to page 1 when filters change
+  useEffect(() => { setPage(1) }, [debouncedQ, typeFilter])
+
+  // fetch page
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const params = new URLSearchParams({ page: String(page), pageSize: String(GALLERY_PICK_PAGE_SIZE) })
+    if (debouncedQ) params.set("q", debouncedQ)
+    if (typeFilter !== "all") params.set("type", typeFilter)
+    authFetch(`/api/assets?${params.toString()}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (cancelled || !j) return
+        const newItems: AssetItem[] = j.data?.items || []
+        setItems(prev => page === 1 ? newItems : [...prev, ...newItems])
+        setTotal(j.data?.total || 0)
+        // load thumb URLs
+        setPreviewMap(prev => {
+          const next = { ...prev }
+          let changed = false
+          newItems.forEach(a => {
+            if (!next[a.id]) { next[a.id] = `/api/assets/${a.id}/preview?variant=thumb`; changed = true }
+          })
+          return changed ? next : prev
+        })
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page, debouncedQ, typeFilter])
+
+  const hasMore = items.length < total
+  const loadMore = () => { if (!loading && hasMore) setPage(p => p + 1) }
+
+  // infinite scroll
+  const onScroll = useCallback(() => {
+    const el = listRef.current
+    if (!el || loading || !hasMore) return
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadMore()
+  }, [loading, hasMore])
+
   return (
     <div style={modalOverlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>从图库选底图</h3>
+      <div style={{ ...modalStyle, maxWidth: 820 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 16 }}>{title || "从图库选择"}</h3>
           <button className="evss-btn ghost" onClick={onClose}>✕</button>
         </div>
-        <input className="field" placeholder="搜索文件名…" value={q}
-          onChange={e => setQ(e.target.value)} style={{ marginBottom: 14 }} />
-        <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+          <input
+            className="field"
+            placeholder="搜索文件名 / 展示名…"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            style={{ flex: "1 1 200px", marginBottom: 0 }}
+          />
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {(Object.keys(GALLERY_PICK_TYPE_LABELS) as PickTypeFilter[]).map(k => (
+              <button
+                key={k}
+                type="button"
+                className={`evss-chip evss-chip-sm ${typeFilter === k ? "active" : ""}`}
+                onClick={() => setTypeFilter(k)}
+              >{GALLERY_PICK_TYPE_LABELS[k]}</button>
+            ))}
+          </div>
+        </div>
+        <div
+          ref={listRef}
+          onScroll={onScroll}
+          style={{ maxHeight: "58vh", overflowY: "auto", border: "1px solid var(--evss-border)", borderRadius: 8, padding: 10 }}
+        >
+          {items.length === 0 && !loading && (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "var(--evss-text-2, #888)" }}>
+              {debouncedQ ? "没有匹配的图片" : "暂无资产，先去图库上传吧"}
+            </div>
+          )}
           <div className="evss-gallery-grid">
-            {filtered.map(a => (
+            {items.map(a => (
               <div key={a.id} className="evss-gallery-card" onClick={() => onPick(a)}>
                 <div className="evss-gallery-thumb"
-                  ref={el => {
-                    if (!el) return
-                    if (previewUrls[a.id]) {
-                      el.style.backgroundImage = `url(${previewUrls[a.id]})`
-                      return
-                    }
-                    const io = new IntersectionObserver((ents) => {
-                      for (const ent of ents) {
-                        if (ent.isIntersecting) { onRequestPreview(a.id); io.disconnect() }
-                      }
-                    })
-                    io.observe(el)
-                  }}
+                  style={previewMap[a.id] ? { backgroundImage: `url(${previewMap[a.id]})` } : undefined}
                 />
                 <div className="evss-gallery-meta">
-                  <div className="name">{a.filename}</div>
-                  <div className="sub">{a.width || "?"}×{a.height || "?"}</div>
+                  <div className="name" title={a.display_name || a.filename}>{a.display_name || a.filename}</div>
+                  <div className="sub">{a.width || "?"}×{a.height || "?"} · {GALLERY_PICK_TYPE_LABELS[a.type] || a.type}</div>
                 </div>
               </div>
             ))}
           </div>
+          {loading && (
+            <div style={{ textAlign: "center", padding: "16px 0", color: "var(--evss-text-2, #888)" }}>加载中…</div>
+          )}
+          {!loading && hasMore && (
+            <div style={{ textAlign: "center", padding: "8px 0" }}>
+              <button type="button" className="evss-btn ghost sm" onClick={loadMore}>加载更多（共 {total} 张）</button>
+            </div>
+          )}
+          {!loading && !hasMore && items.length > 0 && (
+            <div style={{ textAlign: "center", padding: "8px 0", fontSize: 12, color: "var(--evss-text-2, #888)" }}>
+              共 {total} 张，已全部加载
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -734,28 +809,8 @@ function GalleryPickModal({ assets, previewUrls, onClose, onPick, onRequestPrevi
 function SimpleGenerate({ onToast }: { onToast: (m: string, k?: "ok" | "err") => void }) {
   const [prompt, setPrompt] = useState("")
   const [refAsset, setRefAsset] = useState<{ id: string; filename: string; url: string; width?: number | null; height?: number | null } | null>(null)
-  const [refAssets, setRefAssets] = useState<AssetItem[]>([])
-  const [refPreviewUrls, setRefPreviewUrls] = useState<Record<string, string>>({})
   const [pickOpen, setPickOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-
-  const fetchAssets = useCallback(async () => {
-    try {
-      const res = await authFetch("/api/assets?pageSize=50")
-      if (!res.ok) return
-      const j = await res.json()
-      setRefAssets(j.data?.items || [])
-    } catch {}
-  }, [])
-  useEffect(() => { fetchAssets() }, [fetchAssets])
-
-  useEffect(() => {
-    const missing = refAssets.filter(a => !refPreviewUrls[a.id])
-    if (!missing.length) return
-    const next: Record<string, string> = { ...refPreviewUrls }
-    missing.forEach(a => { next[a.id] = `/api/assets/${a.id}/preview` })
-    setRefPreviewUrls(next)
-  }, [refAssets, refPreviewUrls])
 
   const uploadRef = async (file: File) => {
     const fd = new FormData(); fd.append("file", file)
@@ -770,7 +825,6 @@ function SimpleGenerate({ onToast }: { onToast: (m: string, k?: "ok" | "err") =>
         url: `/api/assets/${asset.id}/preview`,
         width: asset.width, height: asset.height,
       })
-      fetchAssets()
       onToast("参考图已上传", "ok")
     } catch (e: any) { onToast(e.message || "上传失败", "err") }
   }
@@ -939,20 +993,15 @@ function SimpleGenerate({ onToast }: { onToast: (m: string, k?: "ok" | "err") =>
 
       {pickOpen && (
         <GalleryPickModal
-          assets={refAssets}
-          previewUrls={refPreviewUrls}
+          title="选择参考图"
           onClose={() => setPickOpen(false)}
           onPick={(a) => {
             setRefAsset({
               id: a.id, filename: a.filename,
-              url: refPreviewUrls[a.id] || `/api/assets/${a.id}/preview`,
+              url: `/api/assets/${a.id}/preview`,
               width: a.width, height: a.height,
             })
             setPickOpen(false)
-          }}
-          onRequestPreview={(id) => {
-            if (refPreviewUrls[id]) return
-            setRefPreviewUrls(p => ({ ...p, [id]: `/api/assets/${id}/preview` }))
           }}
         />
       )}
@@ -990,26 +1039,18 @@ function Gallery({ onPickBase, onToast, role }: {
   }, [scope])
   useEffect(() => { fetchAssets() }, [fetchAssets])
 
-  const requestPreview = useCallback((id: string) => {
-    if (previewUrls[id]) return
-    setPreviewUrls(p => ({ ...p, [id]: `/api/assets/${id}/preview` }))
-  }, [previewUrls])
-
-  // auto-load on intersection for all visible cards
+  // 缩略图体积很小（4-32KB），直接随列表批量加载，不用 IntersectionObserver 懒加载。
   useEffect(() => {
-    const els = document.querySelectorAll("[data-gallery-id]")
-    const io = new IntersectionObserver((ents) => {
-      ents.forEach(ent => {
-        if (ent.isIntersecting) {
-          const id = (ent.target as HTMLElement).dataset.galleryId!
-          requestPreview(id)
-          io.unobserve(ent.target)
-        }
-      })
-    }, { rootMargin: "200px" })
-    els.forEach(el => io.observe(el))
-    return () => io.disconnect()
-  }, [assets, filter, scope, q, requestPreview])
+    if (!assets.length) return
+    setPreviewUrls(p => {
+      const next = { ...p }
+      let changed = false
+      for (const a of assets) {
+        if (!next[a.id]) { next[a.id] = `/api/assets/${a.id}/preview?variant=thumb`; changed = true }
+      }
+      return changed ? next : p
+    })
+  }, [assets])
 
   const upload = async (file: File) => {
     const fd = new FormData(); fd.append("file", file)
@@ -1020,20 +1061,6 @@ function Gallery({ onPickBase, onToast, role }: {
       onToast("上传成功", "ok")
       fetchAssets()
     } catch (e: any) { onToast(e.message || "上传失败", "err") }
-  }
-
-  const del = async (id: string) => {
-    if (!confirm("确认删除？")) return
-    try {
-      const res = await authFetch(`/api/assets/${id}`, { method: "DELETE" })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        throw new Error(j.error?.message || "删除失败")
-      }
-      onToast("已删除", "ok")
-      setSelected(null)
-      fetchAssets()
-    } catch (e: any) { onToast(e.message || "删除失败", "err") }
   }
 
   const toggleId = (id: string) => {
@@ -1201,8 +1228,6 @@ function Gallery({ onPickBase, onToast, role }: {
               onClick={() => runBatch({ action: "set_visibility", visibility: "public" }, "批量公开")}>🌐 公开</button>
             <button className="evss-btn" disabled={batchBusy}
               onClick={() => runBatch({ action: "set_visibility", visibility: "private" }, "批量转私有")}>🔒 私有</button>
-            <button className="evss-btn danger" disabled={batchBusy}
-              onClick={() => runBatch({ action: "delete" }, "批量删除")}>🗑 删除</button>
           </div>
         )}
 
@@ -1215,7 +1240,6 @@ function Gallery({ onPickBase, onToast, role }: {
             {filtered.map(a => (
               <div key={a.id}
                 className={`evss-gallery-card${selectedIds.has(a.id) ? " batch-selected" : ""}`}
-                data-gallery-id={a.id}
                 onClick={() => {
                   if (batchMode) { toggleId(a.id); return }
                   setSelected(a)
@@ -1279,7 +1303,7 @@ function Gallery({ onPickBase, onToast, role }: {
             </div>
             <div style={{
               aspectRatio: "1/1", background: `#f8fafc center/contain no-repeat`,
-              backgroundImage: previewUrls[selected.id] ? `url(${previewUrls[selected.id]})` : undefined,
+              backgroundImage: `url(/api/assets/${selected.id}/preview)`,
               border: "1px solid var(--evss-border)", borderRadius: 8, marginBottom: 12,
             }} />
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1287,7 +1311,7 @@ function Gallery({ onPickBase, onToast, role }: {
                 onPickBase({
                   id: selected.id,
                   filename: selected.filename,
-                  url: previewUrls[selected.id] || `/api/assets/${selected.id}/preview`,
+                  url: `/api/assets/${selected.id}/preview`,
                   width: selected.width,
                   height: selected.height,
                 })
@@ -1295,16 +1319,11 @@ function Gallery({ onPickBase, onToast, role }: {
               }}>
                 🎨 选作底图
               </button>
-              {previewUrls[selected.id] && (
-                <a className="evss-btn" href={previewUrls[selected.id]} target="_blank" rel="noreferrer" download>⬇ 下载</a>
-              )}
+              <a className="evss-btn" href={`/api/assets/${selected.id}/preview?download=1`} target="_blank" rel="noreferrer">⬇ 下载</a>
               {(selected.is_mine || role === "admin") && (
                 <button className="evss-btn" onClick={() => toggleVisibility(selected)}>
                   {selected.visibility === "public" ? "🔒 转为私有" : "🌐 公开"}
                 </button>
-              )}
-              {(selected.is_mine || role === "admin") && (
-                <button className="evss-btn danger" style={{ marginLeft: "auto" }} onClick={() => del(selected.id)}>删除</button>
               )}
             </div>
             {selected.owner?.name && (

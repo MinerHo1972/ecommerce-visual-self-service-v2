@@ -15,9 +15,11 @@
 
 | 角色 | 默认入口 | 能力 |
 | --- | --- | --- |
-| operator | `/operator` | 运营工作台：生图/改图、图库（自己+公开）、批量管理 |
-| designer | `/designer` | 设计师工作台（待完善） |
-| admin | `/operator` | 全功能：可查看/删除/改可见性/打标签任意图片、批量操作 |
+| operator | `/operator` | 运营工作台：生图/改图、图库（自己+公开）、批量改名/可见性/标签 |
+| designer | `/designer` | 设计师工作台（模板与素材管理） |
+| admin | `/operator` | 全功能：可查看/改名/改可见性/打标签任意图片 |
+
+资产删除动作不对外开放；单资产与批量资产 API 均不接受删除操作。数据库中的历史软删除字段保留用于兼容既有数据和审计，不作为新管理入口。
 
 账密兜底（仅本地/兜底，登录页已隐藏入口）：
 - `operator@shop.local / operator123`
@@ -30,6 +32,7 @@
 npm run dev         # 本地开发
 npm run build       # 生产构建（输出 .next/standalone）
 npm run typecheck   # tsc --noEmit
+npm run lint        # ESLint 9 flat config
 npm run db:generate # prisma generate
 npm run db:migrate  # 开发环境迁移
 ```
@@ -47,7 +50,7 @@ cp -r public .next/standalone/ 2>/dev/null || true
 pm2 delete evss-web; pm2 start ecosystem.config.js --only evss-web
 ```
 
-环境变量见 `.env.example`。
+环境变量见 `.env.example`。生产环境保持 `GENERATION_PROVIDER=seedream`，只需核验 `SEEDREAM_API_KEY` 已配置，不要在日志或交付物中输出密钥值。
 
 ## 目录结构
 
@@ -55,6 +58,7 @@ pm2 delete evss-web; pm2 start ecosystem.config.js --only evss-web
 src/
   app/                # Next.js App Router
     api/              # 路由处理（auth/assets/generation/layer-templates/image-crop）
+    assets/           # 共享素材管理
     operator/         # 运营工作台
     designer/         # 设计师工作台
     admin/            # 管理后台（占位）
@@ -62,6 +66,7 @@ src/
   components/         # React 组件（含 ui/ 基础组件）
   lib/
     auth/             # JWT、飞书 OAuth、API 鉴权
+    assets/           # 资产访问权限与 display_name
     db/               # Prisma 客户端
     providers/        # 生图模型（seedream / openai / mock）
     render/           # 图层合成引擎
@@ -73,8 +78,17 @@ src/
 prisma/               # schema / migrations / seed
 ```
 
-## 标签系统
+## 标签与素材名称
 
-- 标签存储在 `assets.metadata_json.tags: string[]`（无需 schema 迁移）
-- 图库支持标签 chip 筛选、搜索框同时匹配文件名/标签、批量加/删标签
-- API：`POST /api/assets/batch`，action: `delete | set_visibility | add_tags | remove_tags`
+- `display_name` 与原始 `filename` 解耦，迁移 `20260804000000_add_asset_display_name` 已将历史 NULL 全量回填。
+- 标签存储在 `assets.metadata_json.tags: string[]`（无需 schema 迁移）。
+- 图库支持标签 chip 筛选、搜索框同时匹配文件名/标签、批量加/删标签。
+- API：`PATCH /api/assets/:id` 支持 `display_name`、`visibility`；`POST /api/assets/batch` 支持 `set_visibility | add_tags | remove_tags`。
+
+## 发布记录
+
+- 当前发布：ECS `/root/evss-releases/s18-p1-seedream-full`，迁移已应用，PM2 web 2 实例与 worker 1 实例 online。
+- 健康检查：`/api/health` 返回 HTTP 200；health 当前不含 version 字段。
+- 构建验证：Prisma generate/validate、typecheck、production build 已通过；仓库无 focused test 文件。
+- 真实浏览器角色验收受云端 Chrome 启动失败影响，未以 API 结果替代 UI 验收。
+- 源码 release 无 Git 元数据，版本追踪以本地基线 `1a98210` 与部署时间/受控源码指纹为准。

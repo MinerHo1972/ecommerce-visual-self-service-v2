@@ -95,30 +95,36 @@ export function MultiRegionPicker({
   const containerRef = React.useRef<HTMLDivElement | null>(null)
   const scrollerRef = React.useRef<HTMLDivElement | null>(null)
   const sizerRef = React.useRef<HTMLDivElement | null>(null)
-  const [baseW, setBaseW] = React.useState<number>(0)
+  const imgRef = React.useRef<HTMLImageElement | null>(null)
+  // 兜底：从图片 naturalWidth/Height 获取真实尺寸（防止 canvasSize 不准导致裁切）
+  const [naturalSize, setNaturalSize] = React.useState<{ w: number; h: number } | null>(null)
 
-  // 测量 scroller 未缩放时的可视宽度，作为 baseW；用 ResizeObserver 持续跟踪
-  React.useEffect(() => {
-    const el = scrollerRef.current
-    if (!el) return
-    const update = () => {
-      // zoom=1 时测量；zoom>1 时也读 clientWidth（即外层给的宽度）
-      setBaseW(el.clientWidth)
-    }
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  // 优先使用图片真实尺寸，其次使用传入的 canvasSize
+  const effectiveSize = React.useMemo(() => {
+    if (naturalSize && naturalSize.w > 0 && naturalSize.h > 0) return naturalSize
+    return { w: canvasSize.w || 1, h: canvasSize.h || 1 }
+  }, [naturalSize, canvasSize.w, canvasSize.h])
 
-  // sizer 实际物理像素宽高：baseW * zoom × baseW/ratio * zoom
+  // sizer 尺寸：
+  // - 宽度始终 100%（由 scroller 内容区决定，自动考虑垂直滚动条宽度），不再用 JS 量 clientWidth；
+  // - zoom>1 时通过 CSS scale 整体放大，避免手写像素宽高与浏览器实际布局出现 1~15px 偏差
+  //   （之前 baseW=clientWidth 不扣滚动条，是底部被裁半行的根因）。
   const sizerStyle: React.CSSProperties = React.useMemo(() => {
-    if (!baseW) return { width: "100%", position: "relative" as const }
-    const ratio = canvasSize.w / canvasSize.h
-    const w = Math.round(baseW * zoom)
-    const h = Math.round(w / ratio)
-    return { width: w, height: h, position: "relative" as const }
-  }, [baseW, zoom, canvasSize.w, canvasSize.h])
+    return {
+      width: "100%",
+      aspectRatio: `${effectiveSize.w} / ${effectiveSize.h}`,
+      transform: zoom === 1 ? "none" : `scale(${zoom})`,
+      transformOrigin: "top left",
+      // scale 不影响布局盒模型，需要显式撑大 sizer 以触发滚动条
+      ...(zoom === 1 ? {} : {
+        width: `${zoom * 100}%`,
+        height: "auto",
+        marginBottom: `${(zoom - 1) * 100 / (effectiveSize.w / effectiveSize.h)}%`,
+        marginRight: `${(zoom - 1) * 100}%`,
+      }),
+      position: "relative" as const,
+    }
+  }, [zoom, effectiveSize.w, effectiveSize.h])
   // 切换缩放后让已选第一个区域滚到视野中央
   const centerOnRegions = React.useCallback(() => {
     const el = scrollerRef.current
@@ -230,7 +236,7 @@ export function MultiRegionPicker({
     const onUp = () => {
       if (drag.kind === 'create') {
         const rect = rectFromPoints(drag.start, drag.current)
-        if (rect.width * canvasSize.w >= 6 && rect.height * canvasSize.h >= 6) {
+        if (rect.width * effectiveSize.w >= 6 && rect.height * effectiveSize.h >= 6) {
           const newRegion: RegionItem = { id: genId(), index: 0, rect }
           if (multiple) {
             if (value.length < maxRegions) {
@@ -251,7 +257,7 @@ export function MultiRegionPicker({
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
     }
-  }, [drag, getPt, canvasSize.w, canvasSize.h, multiple, value, onChange, maxRegions, onLimit])
+  }, [drag, getPt, effectiveSize.w, effectiveSize.h, multiple, value, onChange, maxRegions, onLimit])
 
   const handleRemove = (id: string) => {
     if (readonly) return
@@ -312,17 +318,19 @@ export function MultiRegionPicker({
           </span>
         </div>
       )}
-      {/* 滚动容器：放大后内部元素溢出，靠滚动来查看 */}
+      {/* 滚动容器：maxHeight 取 58vh/520px 中较小值，确保在 Coze 内嵌 iframe / 小屏
+          上也能完整落在首屏并出现滚动条，避免画布底部被推到折叠区之下"看不全"。 */}
       <div
         ref={scrollerRef}
         className="region-scroller"
         style={{
-          overflow: zoom > 1 ? "auto" : "hidden",
-          maxHeight: zoom > 1 ? "72vh" : "none",
-          border: zoom > 1 ? "1px solid var(--border)" : "none",
-          borderRadius: 6,
+          overflow: "auto",
+          maxHeight: "min(58vh, 520px)",
+          border: "1px solid var(--border)",
+          borderRadius: 0,
           background: "#f8fafc",
           position: "relative",
+          boxSizing: "border-box",
         }}
       >
         <div
@@ -333,26 +341,35 @@ export function MultiRegionPicker({
           ref={containerRef}
           className="region-picker"
           style={{
-            aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,
+            // sizer 已用 aspectRatio 决定高度，container 只占满 sizer，不能再自己写 height:100%
+            // 否则会按 sizer 显式高度 + img 100% 叠加，产生底部溢出。
+            aspectRatio: `${effectiveSize.w} / ${effectiveSize.h}`,
             position: "relative",
             userSelect: "none",
             cursor: readonly ? "default" : "crosshair",
             width: "100%",
-            height: "100%",
             maxWidth: "none",
             marginTop: 0,
             background: "#0f172a",
-            border: "1px solid var(--border)",
-            borderRadius: zoom > 1 ? 0 : 16,
+            border: 0,
+            borderRadius: 0,
+            boxSizing: "border-box",
             overflow: "hidden",
           }}
           onMouseDown={handleCanvasMouseDown}
           title={readonly ? "" : "按住鼠标拖选矩形区域；拖框移动/角点调整大小"}
         >
           <img
+            ref={imgRef}
             src={imageUrl}
             alt="待框选"
-            style={{ width: "100%", height: "100%", display: "block", pointerEvents: "none", objectFit: "cover" }}
+            onLoad={(e) => {
+              const img = e.currentTarget
+              if (img.naturalWidth && img.naturalHeight) {
+                setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+              }
+            }}
+            style={{ width: "100%", height: "100%", display: "block", pointerEvents: "none", objectFit: "fill" }}
             draggable={false}
           />
         {value.map((r) => {

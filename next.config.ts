@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
     ],
   },
   // Prisma 7 + pg 需要排除打包，走运行时 require
-  serverExternalPackages: ["@prisma/client", "pg", "@prisma/adapter-pg", "@volcengine/tos-sdk", "@napi-rs/canvas"],
+  serverExternalPackages: ["@prisma/client", "pg", "@prisma/adapter-pg", "@volcengine/tos-sdk", "@napi-rs/canvas", "sharp"],
 };
 
 export default nextConfig;

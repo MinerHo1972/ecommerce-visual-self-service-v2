@@ -29,6 +29,7 @@ interface AssetItem {
   id: string
   type: string
   filename: string
+  display_name?: string
   width: number | null
   height: number | null
 }
@@ -89,7 +90,7 @@ export default function DesignerPage() {
 
   const fetchAssets = useCallback(async () => {
     try {
-      const res = await fetch('/api/assets?page_size=100')
+      const res = await fetch('/api/assets?pageSize=100')
       if (res.ok) { const json = await res.json(); setAssets(json.data?.items || []) }
     } catch {}
   }, [])
@@ -175,6 +176,7 @@ export default function DesignerPage() {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm muted">欢迎，{user.name}（设计师）</span>
+            <a href="/assets" className="button">素材管理</a>
             <button onClick={() => { fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location.href = '/login') }} className="button">退出登录</button>
           </div>
         </div>
@@ -265,7 +267,7 @@ export default function DesignerPage() {
             <Field label="商品图资产">
               <Select value={selectedAssetId} onChange={(e) => setSelectedAssetId(e.target.value)}>
                 <option value="">— 选择资产 —</option>
-                {assets.map((a) => <option key={a.id} value={a.id}>{a.filename} ({a.width}×{a.height})</option>)}
+                {assets.map((a) => <option key={a.id} value={a.id}>{a.display_name || a.filename} ({a.width}×{a.height})</option>)}
               </Select>
             </Field>
           </div>

@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 import { getProvider } from '@/lib/providers/registry'
 import { initProviders } from '@/lib/providers'
 import { putObject } from '@/lib/tos/tos-client'
+import { createAndUploadThumb } from '@/lib/assets/thumbnail'
 import { ERROR_MESSAGE_SAFE } from '@/lib/types/provider'
 import type { ProviderErrorCode, ProviderImage } from '@/lib/types/provider'
 import { runP0QualityCheck } from '@/lib/quality/p0-check'
@@ -72,6 +73,14 @@ async function uploadToTosAndCreateAsset(
 
   await putObject(tosKey, buffer, mimeType)
 
+  // B 方案：同步生成 400px 缩略图；失败不阻断主图入库。
+  let thumbTosKey: string | null = null
+  try {
+    thumbTosKey = await createAndUploadThumb(buffer, tosKey)
+  } catch (thumbErr) {
+    log(`thumbnail failed for ${tosKey}: ${thumbErr instanceof Error ? thumbErr.message : thumbErr}`)
+  }
+
   const asset = await prisma.asset.create({
     data: {
       type: 'generated_image',
@@ -84,6 +93,7 @@ async function uploadToTosAndCreateAsset(
       visibility: 'private',
       tos_bucket: process.env.TOS_BUCKET || '',
       tos_key: tosKey,
+      thumb_tos_key: thumbTosKey,
       owner_id: ownerId,
     },
   })
