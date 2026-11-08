@@ -5,7 +5,7 @@ module.exports = {
       script: '.next/standalone/server.js',
       env: { PORT: 3000, NODE_ENV: 'production' },
       interpreter: 'node',
-      instances: 1,
+      instances: 2,
       autorestart: true,
     },
     {
